@@ -8,4 +8,11 @@ _Scrape history of wikipedia articles and explore their distributional propertie
 pipenv install
 ```
 
-This will create a virtualenv to work with and install all dependencies. Notable requirements include `scrapy`, `lxml`, and `pandas`.
+This will create a virtualenv to work with and install all dependencies. Notable requirements include `scrapy`, and later on probably `pandas`. 
+
+To run the crawler, use 
+
+```
+pipenv shell
+scrapy crawl history
+```
