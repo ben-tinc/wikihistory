@@ -6,8 +6,8 @@ import re
 
 import scrapy
 
-# Ignore revisions older than 3 years.
-MAX_DAYS_AGE = 1095
+# Ignore revisions older than 4 years.
+MAX_DAYS_AGE = 1460
 
 
 class HistorySpider(scrapy.Spider):
@@ -17,7 +17,8 @@ class HistorySpider(scrapy.Spider):
     def start_requests(self):
         template = 'https://de.wikipedia.org/wiki/Kategorie:{}'
         # Default value, if there were no command line arguments.
-        categories = getattr(self, 'cats', 'Rechtsextremismus')
+        categories = getattr(self, 'cats', 'Geschichte_der_Malerei,Rechtsextremismus,Kernenergie,Mathematik')
+        #categories = 'Altes_Ägypten'
         categories = categories.split(',')
 
         for cat in categories:
@@ -43,7 +44,20 @@ class HistorySpider(scrapy.Spider):
             request = scrapy.Request(url=history_url, callback=self.parse_history)
             request.meta['category'] = response.meta['category']
             request.meta['pagename'] = pagename
+            request.meta['subcat'] = response.meta.get('subcat', None)
             yield request
+        
+        if response.meta.get('subcat', None) is None:
+            subcats = response.css('div#mw-subcategories li a::attr(href)').extract()
+            
+            for path in subcats:
+                url = 'https://de.wikipedia.org' + path
+                pagename = path.split('/')[-1]
+                request = scrapy.Request(url=url, callback=self.parse_category)
+                request.meta['category'] = response.meta['category']
+                request.meta['subcat'] = pagename
+                yield request
+
    
     def parse_history(self, response):
         # Determine the datetime offset of this history page.
@@ -75,6 +89,7 @@ class HistorySpider(scrapy.Spider):
                 'change_size': change_size,
                 'revert': revert,
                 'category': response.meta['category'],
+                'subcat': response.meta.get('subcat', None),
                 'pagename': response.meta['pagename'],
             }
         # After parsing all the revision items, look if there is another page 
