@@ -67,20 +67,18 @@ class HistorySpider(scrapy.Spider):
 
         for item in response.css('ul#pagehistory li'):
             user = item.css('span.history-user bdi::text').extract_first()
-            date = item.css('a.mw-changeslist-date::text').extract_first()
+            # can be both <span> and <a>
+            date = item.css('.mw-changeslist-date::text').extract_first() 
             minor = item.css('abbr.minoredit').extract_first() != None
             history_size = item.css('span.history-size::text').extract_first()
             change_size = item.css('span.mw-plusminus-pos::text').extract_first()
             if change_size is None:
-                change_size = item.css('span.mw-plusminus-neg::text').extract_first()
+                change_size = item.css('span.mw-plusminus-neg::text').extract_first() or 0
             # In theory, there is a mediawiki marker for changes which revert
             # to previous versions, but these are often times not present.
             # So we need to use heuristics to find out if a given version is 
             # a revert.
-            revert = False
-            comment = item.css('span.comment::text').extract_first()
-            if comment is not None:
-                revert = 'rückgängig' in comment
+            revert = self._check_if_revert(item)
             yield {
                 'user': user,
                 'date': date,
@@ -109,3 +107,19 @@ class HistorySpider(scrapy.Spider):
         except:
             dt = None    
         return dt
+    
+    def _check_if_revert(self, item):
+        """Heuristic to check if a given listitem is a revert of a previous
+        edit.
+        """
+        revert = False
+        if (
+            item.css('.mw-tag-marker-mw-rollback').extract_first() is not None
+            or item.css('.mw-tag-marker-mw-undo').extract_first() is not None):
+            return True
+        comment = item.css('span.comment::text').extract_first()
+        if comment is not None:
+            comment = comment.lower()
+            revert = ('rückgängig' in comment or 'zurückgesetzt' in comment)
+        return revert
+
