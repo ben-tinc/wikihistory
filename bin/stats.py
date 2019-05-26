@@ -3,6 +3,10 @@ from datetime import datetime
 import json
 import re
 
+import numpy as np
+import pandas as pd
+from pandas import DataFrame, Index, Series
+
 
 DATE_PATTERN = re.compile(r'(\d{2}):(\d{2}), (\d{1,2})\. (\S{3})\.? (\d{4})')
 
@@ -26,7 +30,8 @@ def is_IPv4(string):
 def is_IPv6(string):
     # e.g. '2001:628:404:31:58c0:f621:1aea:e7f5'
     elem = r"[0-9a-f]{0,4}"
-    pattern = r"{}:{}:{}:{}".format(elem, elem, elem, elem)
+    pattern = r"{}:{}:{}:{}:{}:{}:{}:{}".format(elem, elem, elem, elem,
+                                                elem, elem, elem, elem)
     return re.match(pattern, string) is not None
 
 
@@ -165,16 +170,135 @@ def stats_by_page(data):
     }
 
 
-def order_by_anon_prop(data):
+""" def order_by_anon_prop(data):
     data = OrderedDict(data)
-    data = sorted(data.items(), key=lambda x: x[1]['anon_edit_prop']
+    data = sorted(data.items(), key=lambda x: x[1]['anon_edit_prop'])
+    return data """
 
 
-def all_stats(cat="Rechtsextremismus"):
-    filename = "results/{}.json".format(cat.lower())
-    data = load(filename)
-    print(f"== {cat} ==")
-    print(page_stats(data))
-    print(user_stats(data))
-    print(time_stats(data))
-    print(edit_size_stats(data))
+def combine_dfs(d1, d2):
+    return d1.append(d2)
+
+
+def to_dataframe(data):
+    return DataFrame(data)
+
+
+def add_is_IP(data):
+    """Compute and add a new column to the `DataFrame` which contains info
+    about wether the user name is just an IP address.
+    """
+    data['is_IP'] = data['user'].map(is_IP)
+    return data
+
+
+
+def add_revert_heuristic(data):
+    """This is much better than my previous try, but it still depends on the
+    data frame being sorted by date and the edits of each page being grouped
+    together.
+    """
+    df_1 = data[['pagename', 'int_change_size']]
+    df_2 = df_1.shift(-1).add_prefix('next_')
+    merged = pd.concat([df_1, df_2], axis=1)
+
+    def is_revert(name, change, next_name, next_change):
+        """Do the actual work."""
+        pass
+    def is_reverted(name, change, next_name, next_change):
+        pass
+    
+    reverts = merged.apply(
+        lambda x: is_revert(x.pagename, x.int_change_size, x.next_pagename,
+                            x.next_int_change_size),
+        axis=1)
+    reverted = merged.apply(
+        lambda x: is_reverted(x.pagename, x.int_change_size, x.next_pagename,
+                              x.next_int_change_size),
+        axis=1)
+    data['probably_revert'] = reverts
+    data['probably_reverted'] = reverted
+    return data
+
+
+""" 
+def add_reverted(data): """
+    """Compute and add a new column to the `DataFrame` which indicates if
+    an edit is 'probably an revert' or 'probably got reverted'. This is based
+    on the assumption, that an edit that has the exact inverse of the previous
+    edit as its change_size, probably reverts its predecessor.
+
+    Note: this depends heavily on the concrete shape of the dataframe!! 
+    It currently looks like this:
+    0 => Index
+    1 => category
+    2 => change_size
+    3 => date
+    4 => history_size
+    5 => minor
+    6 => pagename
+    7 => revert
+    8 => subcat
+    9 => user
+    10 => datetime
+    11 => int_change_size
+    12 => is_IP
+
+    Note also that this depends on the edits being sorted in such a way, that
+    all the edits of each page are consecutive.
+
+    All in all, this code is kind of ugly, maybe I will find a better way in
+    the future...
+    """
+   """  prev_change_size = 0
+    prev_pagename = None
+    reverts = [False]
+    reverted = []
+
+    # For every edit, check if it probably reverts the previous one.
+    # Then, save its change_size to make it possible to check the next.
+    for (idx, _, _, _, _, _, pagename, revert, _, _, _, int_change_size, _) in data.itertuples():
+        if revert:
+            # If revert is already set, trust it.
+            reverts.append(True)
+            reverted.append(True)
+        elif pagename != prev_pagename and prev_pagename is not None:
+            # If we are on a new page, add default values, because we can not know
+            # wether the first edit is a revert.
+            reverts.append(False)
+            reverted.append(False)
+        else:
+            # Our actual heuristic..
+            guess = (int_change_size + prev_change_size) == 0
+            reverts.append(guess)
+            reverted.append(guess)
+        # Always update the size of the last change and the last pagename.
+        prev_change_size = int_change_size
+        prev_pagename = pagename
+    
+    # We can not know if the very last edit got reverted.
+    reverted.append(False)
+
+    assert(data.shape[0] == len(reverts))
+    data['probably_revert'] = reverts
+    data['probably_reverted'] = reverted
+    return data """
+
+
+def normalize_change_size(data):
+    data['change_size'].fillna(value=0, inplace=True)
+    return data
+
+
+def main():
+    # Load most recent data.
+    d1 = load("results/Geschichte_der_Malerei.json")
+    d2 = load("results/Rest.json")
+    data = combine_dfs(to_dataframe(d1), to_dataframe(d2))
+
+    # Add derivative data columns.
+    data['datetime'] = data['date'].map(parse_date)
+    data['change_size'] = data['change_size'].map(int)
+    data['is_IP'] = data['user'].map(is_IP)
+
+    return data
