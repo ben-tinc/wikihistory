@@ -1,6 +1,9 @@
 from unittest import TestCase
 from datetime import datetime
 
+import pandas as pd
+from pandas import DataFrame
+
 from bin.stats import parse_date, parse_size
 
 
@@ -27,3 +30,10 @@ class StatsTest(TestCase):
         ]
         for string, result in known:
             self.assertEqual(parse_size(string), result)
+
+
+    def test_revert_heuristic(self):
+        df = DataFrame({
+            'pagename': ['']
+        })
+

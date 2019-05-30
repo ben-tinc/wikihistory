@@ -198,91 +198,36 @@ def add_revert_heuristic(data):
     data frame being sorted by date and the edits of each page being grouped
     together.
     """
-    df_1 = data[['pagename', 'int_change_size']]
-    df_2 = df_1.shift(-1).add_prefix('next_')
-    merged = pd.concat([df_1, df_2], axis=1)
+    orig = data[['pagename', 'change_size', 'revert']]
+    prev_ = orig.shift(-1).add_prefix('prev_')
+    next_ = orig.shift(1).add_prefix('next_')
 
-    def is_revert(name, change, next_name, next_change):
-        """Do the actual work."""
-        pass
-    def is_reverted(name, change, next_name, next_change):
-        pass
-    
-    reverts = merged.apply(
-        lambda x: is_revert(x.pagename, x.int_change_size, x.next_pagename,
-                            x.next_int_change_size),
+    for_is_revert = pd.concat([orig, prev_], axis=1)
+    for_got_reverted = pd.concat([orig, next_], axis=1)
+
+    def heuristic(name, change, cmp_name, cmp_change, later_revert):
+        """Do the actual work. `name` and `change` always refers to the current
+        row, the cmp parameters belong to the previous (in case of a revert
+        check) or to the next (for a got-reverted check) row. The `later_revert`
+        parameter is the revert column of the later edit.
+        """
+        if later_revert:
+            return True
+        return name == cmp_name and change + cmp_change == 0
+
+    probably_revert = for_is_revert.apply(
+        lambda x: heuristic(x.pagename, x.change_size,
+                            x.prev_pagename, x.prev_change_size,
+                            x.revert),
         axis=1)
-    reverted = merged.apply(
-        lambda x: is_reverted(x.pagename, x.int_change_size, x.next_pagename,
-                              x.next_int_change_size),
+    probably_reverted = for_got_reverted.apply(
+        lambda x: heuristic(x.pagename, x.change_size,
+                            x.next_pagename, x.next_change_size,
+                            x.next_revert),
         axis=1)
-    data['probably_revert'] = reverts
-    data['probably_reverted'] = reverted
+    data['probably_revert'] = probably_revert
+    data['probably_reverted'] = probably_reverted
     return data
-
-
-""" 
-def add_reverted(data): """
-    """Compute and add a new column to the `DataFrame` which indicates if
-    an edit is 'probably an revert' or 'probably got reverted'. This is based
-    on the assumption, that an edit that has the exact inverse of the previous
-    edit as its change_size, probably reverts its predecessor.
-
-    Note: this depends heavily on the concrete shape of the dataframe!! 
-    It currently looks like this:
-    0 => Index
-    1 => category
-    2 => change_size
-    3 => date
-    4 => history_size
-    5 => minor
-    6 => pagename
-    7 => revert
-    8 => subcat
-    9 => user
-    10 => datetime
-    11 => int_change_size
-    12 => is_IP
-
-    Note also that this depends on the edits being sorted in such a way, that
-    all the edits of each page are consecutive.
-
-    All in all, this code is kind of ugly, maybe I will find a better way in
-    the future...
-    """
-   """  prev_change_size = 0
-    prev_pagename = None
-    reverts = [False]
-    reverted = []
-
-    # For every edit, check if it probably reverts the previous one.
-    # Then, save its change_size to make it possible to check the next.
-    for (idx, _, _, _, _, _, pagename, revert, _, _, _, int_change_size, _) in data.itertuples():
-        if revert:
-            # If revert is already set, trust it.
-            reverts.append(True)
-            reverted.append(True)
-        elif pagename != prev_pagename and prev_pagename is not None:
-            # If we are on a new page, add default values, because we can not know
-            # wether the first edit is a revert.
-            reverts.append(False)
-            reverted.append(False)
-        else:
-            # Our actual heuristic..
-            guess = (int_change_size + prev_change_size) == 0
-            reverts.append(guess)
-            reverted.append(guess)
-        # Always update the size of the last change and the last pagename.
-        prev_change_size = int_change_size
-        prev_pagename = pagename
-    
-    # We can not know if the very last edit got reverted.
-    reverted.append(False)
-
-    assert(data.shape[0] == len(reverts))
-    data['probably_revert'] = reverts
-    data['probably_reverted'] = reverted
-    return data """
 
 
 def normalize_change_size(data):
@@ -300,5 +245,7 @@ def main():
     data['datetime'] = data['date'].map(parse_date)
     data['change_size'] = data['change_size'].map(int)
     data['is_IP'] = data['user'].map(is_IP)
+    # Maybe modify the API to return the new column(s) instead?
+    data = add_revert_heuristic(data)
 
     return data
