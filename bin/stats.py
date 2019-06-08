@@ -1,5 +1,4 @@
-from collections import OrderedDict
-from datetime import datetime
+from datetime import datetime as dt
 import json
 import re
 
@@ -14,11 +13,15 @@ MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun',
           'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez']
 
 
-def load(fn="results/rechtsextremismus.json"):
-    data = None
-    with open(fn) as f:
-        data = json.load(f)
-    return data
+def read(fns=["results/rechtsextremismus.json"]):
+    df = None
+    for fn in fns:
+        with open(fn) as f:
+            if df is None:
+                df = DataFrame(json.load(f))
+            else:
+                df = df.append(DataFrame(json.load(f)))
+    return df
 
 
 def is_IPv4(string):
@@ -30,7 +33,7 @@ def is_IPv4(string):
 def is_IPv6(string):
     # e.g. '2001:628:404:31:58c0:f621:1aea:e7f5'
     elem = r"[0-9a-f]{0,4}"
-    pattern = r"{}:{}:{}:{}:{}:{}:{}:{}".format(elem, elem, elem, elem,
+    pattern = r"^{}:{}:{}:{}:{}:{}:{}:{}$".format(elem, elem, elem, elem,
                                                 elem, elem, elem, elem)
     return re.match(pattern, string) is not None
 
@@ -60,14 +63,14 @@ def parse_date(string):
     try:
         hour, minute, day, mon, year = match.groups()
         mon = MONTHS.index(mon) + 1
-        return datetime(int(year), mon, int(day), int(hour), int(minute))
+        return dt(int(year), mon, int(day), int(hour), int(minute))
     except Exception as e:
         # Whatever, we return None anyway..
         print(e)
         pass
     return None
 
-
+"""
 def page_stats(data):
     entries = [(i["user"], i["pagename"]) for i in data]
     page_count = len({i[1] for i in entries})
@@ -136,10 +139,6 @@ def general_stats(data):
     }
 
 
-def filter_irrelevant(data):
-    """Filter out edits which are very small or instantly reverted."""
-
-
 def stats_by_category(data):
     """
     • Number of pages per category
@@ -168,66 +167,47 @@ def stats_by_page(data):
         page: general_stats([e for e in data if e['pagename'] == page])
         for page in pages
     }
+ """
+
+def revert_heuristic(name, change, cmp_name, cmp_change, early_dt, late_dt,
+                     later_revert):
+    # Always respect the revert marker, if present, but make sure that NaN
+    # values are treated as falsey values.
+    if later_revert is True:
+        return True
+    if name != cmp_name:
+        return False
+    if late_dt < early_dt:
+        msg = (f'{name} and {cmp_name} are in the wrong order. {late_dt} is '
+               f'earlier than {early_dt}.')
+        raise ValueError(msg)
+    return change + cmp_change == 0
 
 
-""" def order_by_anon_prop(data):
-    data = OrderedDict(data)
-    data = sorted(data.items(), key=lambda x: x[1]['anon_edit_prop'])
-    return data """
+def probably_revert(data):
+    """"""
+    orig = data[['pagename', 'change_size', 'date', 'revert']]
+    prev = orig.shift(-1).add_prefix('prev_')
+    merged = pd.concat([orig, prev], axis=1)
+    return merged.apply(
+        lambda x: revert_heuristic(
+            x.pagename, x.change_size, x.prev_pagename, x.prev_change_size,
+            x.prev_date, x.date, x.revert),
+        axis=1
+    )
 
 
-def combine_dfs(d1, d2):
-    return d1.append(d2)
-
-
-def to_dataframe(data):
-    return DataFrame(data)
-
-
-def add_is_IP(data):
-    """Compute and add a new column to the `DataFrame` which contains info
-    about wether the user name is just an IP address.
-    """
-    data['is_IP'] = data['user'].map(is_IP)
-    return data
-
-
-
-def add_revert_heuristic(data):
-    """This is much better than my previous try, but it still depends on the
-    data frame being sorted by date and the edits of each page being grouped
-    together.
-    """
-    orig = data[['pagename', 'change_size', 'revert']]
-    prev_ = orig.shift(-1).add_prefix('prev_')
+def probably_reverted(data):
+    """"""
+    orig = data[['pagename', 'change_size', 'date', 'revert']]
     next_ = orig.shift(1).add_prefix('next_')
-
-    for_is_revert = pd.concat([orig, prev_], axis=1)
-    for_got_reverted = pd.concat([orig, next_], axis=1)
-
-    def heuristic(name, change, cmp_name, cmp_change, later_revert):
-        """Do the actual work. `name` and `change` always refers to the current
-        row, the cmp parameters belong to the previous (in case of a revert
-        check) or to the next (for a got-reverted check) row. The `later_revert`
-        parameter is the revert column of the later edit.
-        """
-        if later_revert:
-            return True
-        return name == cmp_name and change + cmp_change == 0
-
-    probably_revert = for_is_revert.apply(
-        lambda x: heuristic(x.pagename, x.change_size,
-                            x.prev_pagename, x.prev_change_size,
-                            x.revert),
-        axis=1)
-    probably_reverted = for_got_reverted.apply(
-        lambda x: heuristic(x.pagename, x.change_size,
-                            x.next_pagename, x.next_change_size,
-                            x.next_revert),
-        axis=1)
-    data['probably_revert'] = probably_revert
-    data['probably_reverted'] = probably_reverted
-    return data
+    merged = pd.concat([orig, next_], axis=1)
+    return merged.apply(
+        lambda x: revert_heuristic(
+            x.pagename, x.change_size, x.next_pagename, x.next_change_size,
+            x.date, x.next_date, x.next_revert),
+        axis=1
+    )
 
 
 def normalize_change_size(data):
@@ -235,17 +215,18 @@ def normalize_change_size(data):
     return data
 
 
-def main():
+def load_data():
     # Load most recent data.
-    d1 = load("results/Geschichte_der_Malerei.json")
-    d2 = load("results/Rest.json")
-    data = combine_dfs(to_dataframe(d1), to_dataframe(d2))
-
-    # Add derivative data columns.
-    data['datetime'] = data['date'].map(parse_date)
-    data['change_size'] = data['change_size'].map(int)
-    data['is_IP'] = data['user'].map(is_IP)
-    # Maybe modify the API to return the new column(s) instead?
-    data = add_revert_heuristic(data)
-
+    files = ["results/Geschichte_der_Malerei.json",
+             "results/Rest.json",]
+    data = (read(files)
+        .assign(
+            date=lambda x: x['date'].map(parse_date),
+            is_ip=lambda x: x['user'].map(is_IP),
+            change_size=lambda x:x['change_size'].astype(int))
+        .assign(
+            probably_revert=lambda x: probably_revert(x),
+            probably_reverted=lambda x: probably_reverted(x),
+        )
+    )
     return data
