@@ -5,7 +5,7 @@ import pandas as pd
 from pandas import DataFrame, Series
 import numpy as np
 
-from bin.stats import (
+from lib.preprocessing import (
     parse_date,
     parse_size,
     is_IP,
